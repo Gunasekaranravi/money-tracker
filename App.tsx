@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { hasSmsPermission, requestSmsPermission } from './modules/sms-reader';
@@ -136,19 +136,24 @@ function Main() {
           GPay, PhonePe, Paytm… every payment sends a bank SMS. Money Tracker reads those SMS to show your
           money in and out. Nothing leaves your phone.
         </Text>
-        <Pressable
-          style={styles.primary}
-          onPress={async () => {
-            if (await requestSmsPermission()) {
-              setAccess('granted');
-              await sync();
-            } else {
-              setError('SMS permission was denied. You can allow it in Settings → Apps → Money Tracker.');
-            }
-          }}
-        >
-          <Text style={styles.primaryText}>Allow SMS access</Text>
-        </Pressable>
+        {Platform.OS === 'android' ? (
+          <Pressable
+            style={styles.primary}
+            onPress={async () => {
+              if (await requestSmsPermission()) {
+                setAccess('granted');
+                await sync();
+              } else {
+                setError('SMS permission was denied. You can allow it in Settings → Apps → Money Tracker.');
+              }
+            }}
+          >
+            <Text style={styles.primaryText}>Allow SMS access</Text>
+          </Pressable>
+        ) : (
+          // Browsers can't read SMS, so the web preview runs on sample messages only.
+          <Text style={[styles.para, { marginTop: 24 }]}>Browser preview: SMS reading works only on Android.</Text>
+        )}
         <Pressable
           style={styles.secondary}
           onPress={async () => {

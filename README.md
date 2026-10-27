@@ -27,12 +27,33 @@ Android only: iOS doesn't let apps read SMS. Everything stays on the phone (SQLi
 The first launch reads the last 60 days of SMS. After that, it reads only messages newer than the last one it saw.
 If two SMS share a UPI reference number, only the first is kept.
 
+## Develop with quick reloads
+
+**Browser (UI work, sample data only):**
+
+```bash
+npm run web                  # opens http://localhost:8081 — tap "Try with sample messages"
+```
+
+Browsers can't read SMS. On web the app swaps SQLite for `src/lib/db.web.ts` (saved in localStorage)
+so cards, swipes and the summary still work. Clear site data in the browser to start over.
+
+**Phone (real SMS, live reload):** install the "Money Tracker (Dev)" APK once (`npm run build:dev`),
+then:
+
+```bash
+npm run dev                  # phone and laptop on the same Wi-Fi; open the Dev app and pick this server
+```
+
+JS/TS changes reload on the phone in seconds. Changes to Kotlin (`modules/sms-reader/android`),
+`app.json`/`app.config.js` or new native packages need a new `npm run build:dev`.
+The dev app (`com.gunas.moneytracker.dev`) installs next to the normal app and has its own data.
+
 ## Run it
 
 ```bash
 npm install
 npm run test:parser          # check the parser against sample bank SMS
-npx expo run:android         # dev build on a USB-connected phone (USB debugging on)
 ```
 
 Standalone APK (no laptop needed after install):
