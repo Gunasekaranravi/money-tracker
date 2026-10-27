@@ -1,8 +1,13 @@
 import * as SQLite from 'expo-sqlite';
-import type { ParsedTxn, TxnType } from './parser';
+import { isRefundText, type ParsedTxn, type TxnType } from './parser';
+import { CREATE_SQL, EMPTY_SUMMARY, migrate, SUMMARY_SQL, type Summary } from './schema';
+
+export type { Summary } from './schema';
 
 // null = not reviewed yet
 export type Label = 'need' | 'want' | 'income' | 'ignored';
+// null = normal transaction
+export type Kind = 'refund';
 
 export type Txn = {
   id: string;
@@ -15,6 +20,7 @@ export type Txn = {
   date: number;
   body: string;
   label: Label | null;
+  kind: Kind | null;
 };
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -23,24 +29,9 @@ function db() {
   if (!dbPromise) {
     dbPromise = (async () => {
       const d = await SQLite.openDatabaseAsync('money.db');
-      await d.execAsync(`
-        PRAGMA journal_mode = WAL;
-        CREATE TABLE IF NOT EXISTS txns (
-          id TEXT PRIMARY KEY NOT NULL,
-          type TEXT NOT NULL,
-          amount REAL NOT NULL,
-          party TEXT NOT NULL,
-          bank TEXT NOT NULL,
-          account TEXT,
-          ref TEXT,
-          date INTEGER NOT NULL,
-          body TEXT NOT NULL,
-          label TEXT
-        );
-        CREATE INDEX IF NOT EXISTS txns_ref ON txns(ref);
-        CREATE INDEX IF NOT EXISTS txns_date ON txns(date);
-        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
-      `);
+      await d.execAsync(CREATE_SQL);
+      // Other calls wait for this promise, so nothing runs between these steps.
+      await migrate(d, isRefundText);
       return d;
     })();
   }
@@ -71,9 +62,9 @@ export async function insertTxn(id: string, p: ParsedTxn, date: number, body: st
     if (dup) return false;
   }
   const r = await d.runAsync(
-    `INSERT OR IGNORE INTO txns (id, type, amount, party, bank, account, ref, date, body, label)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-    id, p.type, p.amount, p.party, p.bank, p.account, p.ref, date, body,
+    `INSERT OR IGNORE INTO txns (id, type, amount, party, bank, account, ref, date, body, label, kind)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    id, p.type, p.amount, p.party, p.bank, p.account, p.ref, date, body, p.refund ? 'refund' : null,
   );
   return r.changes > 0;
 }
@@ -94,28 +85,9 @@ export async function getRecent(limit = 15): Promise<Txn[]> {
   );
 }
 
-export type Summary = {
-  inflow: number;
-  outflow: number;
-  need: number;
-  want: number;
-  unreviewedOut: number;
-};
-
 export async function getSummary(from: number, to: number): Promise<Summary> {
-  const row = await (await db()).getFirstAsync<Summary>(
-    `SELECT
-       COALESCE(SUM(CASE WHEN type = 'income' THEN amount END), 0) AS inflow,
-       COALESCE(SUM(CASE WHEN type = 'expense' THEN amount END), 0) AS outflow,
-       COALESCE(SUM(CASE WHEN label = 'need' THEN amount END), 0) AS need,
-       COALESCE(SUM(CASE WHEN label = 'want' THEN amount END), 0) AS want,
-       COALESCE(SUM(CASE WHEN type = 'expense' AND label IS NULL THEN amount END), 0) AS unreviewedOut
-     FROM txns
-     WHERE date >= ? AND date < ? AND (label IS NULL OR label != 'ignored')`,
-    from,
-    to,
-  );
-  return row ?? { inflow: 0, outflow: 0, need: 0, want: 0, unreviewedOut: 0 };
+  const row = await (await db()).getFirstAsync<Summary>(SUMMARY_SQL, from, to);
+  return row ?? EMPTY_SUMMARY;
 }
 
 export async function clearAll() {

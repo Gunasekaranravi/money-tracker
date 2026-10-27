@@ -10,6 +10,7 @@ export const C = {
   need: '#34D399',
   want: '#FBBF24',
   ignore: '#9096A3',
+  refund: '#5EEAD4',
   accent: '#818CF8',
 };
 

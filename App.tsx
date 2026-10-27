@@ -16,12 +16,13 @@ import {
   type Summary,
   type Txn,
 } from './src/lib/db';
+import { EMPTY_SUMMARY } from './src/lib/schema';
 import { loadDemoData, syncSms } from './src/lib/sync';
 import { C, rupees, when } from './src/theme';
 
 type Access = 'checking' | 'granted' | 'needed' | 'demo';
 
-const EMPTY: Summary = { inflow: 0, outflow: 0, need: 0, want: 0, unreviewedOut: 0 };
+const EMPTY: Summary = EMPTY_SUMMARY;
 
 function monthRange(d = new Date()) {
   const from = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
@@ -247,8 +248,11 @@ const TAG: Record<Label, { text: string; color: string }> = {
   ignored: { text: 'Not counted', color: C.ignore },
 };
 
+const REFUND_TAG = { text: 'Refund', color: C.refund };
+
 function RecentRow({ t }: { t: Txn }) {
-  const tag = t.label ? TAG[t.label] : null;
+  // A counted refund keeps label 'income'; show it as "Refund" instead.
+  const tag = t.label === 'income' && t.kind === 'refund' ? REFUND_TAG : t.label ? TAG[t.label] : null;
   const isIncome = t.type === 'income';
   return (
     <View style={styles.rowItem}>

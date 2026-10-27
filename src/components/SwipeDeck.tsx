@@ -153,11 +153,15 @@ function BackCard({ txn, depth, progress }: { txn: Txn; depth: number; progress:
 
 function CardBody({ txn }: { txn: Txn }) {
   const isIncome = txn.type === 'income';
+  const isRefund = txn.kind === 'refund';
   const color = isIncome ? C.income : C.expense;
+  const pillColor = isRefund ? C.refund : color;
   return (
     <View style={styles.body}>
-      <View style={[styles.pill, { backgroundColor: color + '22' }]}>
-        <Text style={[styles.pillText, { color }]}>{isIncome ? '↓ Money in' : '↑ Money out'}</Text>
+      <View style={[styles.pill, { backgroundColor: pillColor + '22' }]}>
+        <Text style={[styles.pillText, { color: pillColor }]}>
+          {isRefund ? '↺ Refund' : isIncome ? '↓ Money in' : '↑ Money out'}
+        </Text>
       </View>
       <Text style={[styles.amount, { color }]}>
         {isIncome ? '+' : '−'}

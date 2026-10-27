@@ -30,7 +30,9 @@
     "test:parser": "node --experimental-strip-types --no-warnings scripts/test-parser.ts",
     "dev": "expo start --dev-client",
     "build:dev": "npx eas-cli@latest build -p android --profile development",
-    "build:apk": "npx eas-cli@latest build -p android --profile preview"
+    "build:apk": "npx eas-cli@latest build -p android --profile preview",
+    "test:summary": "node --experimental-strip-types --no-warnings scripts/test-summary.ts",
+    "test": "npm run -s test:parser && npm run -s test:summary"
   },
   "private": true
 }

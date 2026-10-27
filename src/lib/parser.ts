@@ -76,6 +76,11 @@ function coreText(body: string): string {
 // Future credits ("will be reversed in 48 hrs") are not a completed refund.
 const PENDING_CREDIT = /\bwill be (credited|reversed|refunded)\b[^\n]*/gi;
 
+/** True when an SMS reports a completed refund/reversal. Also used to backfill rows saved earlier. */
+export function isRefundText(body: string): boolean {
+  return REFUND_WORDS.test(coreText(body).replace(PENDING_CREDIT, ''));
+}
+
 function bankFrom(address: string): string {
   // Sender IDs look like "AX-HDFCBK-S" or "VM-SBIUPI".
   const parts = address.toUpperCase().split('-');
