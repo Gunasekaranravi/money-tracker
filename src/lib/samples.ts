@@ -4,7 +4,8 @@
 export type SampleSms = {
   address: string;
   body: string;
-  expect: { type: 'income' | 'expense'; amount: number; party?: string } | null;
+  expect: { type: 'income' | 'expense'; amount: number; party?: string; refund?: boolean } | null;
+  name?: string; // shown in test output
 };
 
 export const SAMPLE_SMS: SampleSms[] = [
@@ -83,5 +84,111 @@ export const SAMPLE_SMS: SampleSms[] = [
     address: '+919876543210',
     body: 'Bro I sent Rs 200 to your account for the movie ticket',
     expect: null,
+  },
+];
+
+// Parser regression cases (test-only, not used for demo data). All numbers and names are made up.
+export const REGRESSION_SMS: SampleSms[] = [
+  {
+    name: 'debit + "Never share your OTP" footer',
+    address: 'VM-SBIUPI',
+    body: 'Dear UPI user A/C X1111 debited by 200.0 on date 01Oct26 trf to TEA STALL Refno 612345678901. Never share your OTP with anyone. -SBI',
+    expect: { type: 'expense', amount: 200, party: 'TEA STALL', refund: false },
+  },
+  {
+    name: 'debit + "If not requested by you" footer',
+    address: 'AX-HDFCBK-S',
+    body: 'Rs.300.00 debited from A/c XX1111 to VPA shop@okhdfc on 01-10-26. UPI Ref 612345678902. If not requested by you, call 18002586161',
+    expect: { type: 'expense', amount: 300, party: 'shop@okhdfc', refund: false },
+  },
+  {
+    name: 'debit + "win rewards" footer',
+    address: 'AD-AXISBK-S',
+    body: 'INR 120.00 debited\nA/c no. XX1111\n01-10-26, 10:11:12\nUPI/P2M/612345678903/CAFE\nPay bills & win rewards on the Axis app',
+    expect: { type: 'expense', amount: 120, party: 'CAFE', refund: false },
+  },
+  {
+    name: 'available balance before the debit amount',
+    address: 'JD-ICICIB-S',
+    body: 'Avl Bal INR 5,000.00. INR 200.00 debited from Acct XX111 on 01-Oct-26 UPI:612345678904',
+    expect: { type: 'expense', amount: 200 },
+  },
+  {
+    name: 'balance after the amount (ATM)',
+    address: 'VM-SBIINB',
+    body: 'Rs.2,000 withdrawn at ATM from A/c X1111 on 01Oct26. Avl Bal Rs.8,000.00',
+    expect: { type: 'expense', amount: 2000 },
+  },
+  {
+    name: 'bare amount, only the balance has a currency sign',
+    address: 'VM-SBIUPI',
+    body: 'Dear UPI user A/C X1111 debited by 150.0 on date 01Oct26 trf to BAKERY Refno 612345678905. Avl bal Rs 4,850.00 -SBI',
+    expect: { type: 'expense', amount: 150, party: 'BAKERY' },
+  },
+  {
+    name: 'credit with available limit mentioned first',
+    address: 'AX-HDFCBK',
+    body: 'Avl Lmt: Rs 49,000. Rs.1,000.00 credited to HDFC Bank Card XX9999 on 01-10-26 towards payment received',
+    expect: { type: 'income', amount: 1000, refund: false },
+  },
+  {
+    name: 'OTP-only message is rejected',
+    address: 'AX-HDFCBK-T',
+    body: '482913 is your OTP to log in to HDFC Bank NetBanking. Valid for 5 mins. Never share it with anyone.',
+    expect: null,
+  },
+  {
+    name: 'promotion without a transaction is rejected',
+    address: 'VM-HDFCBK',
+    body: 'Pay with HDFC Bank UPI and win rewards up to Rs.500 on every payment! T&C apply.',
+    expect: null,
+  },
+  {
+    name: 'declined payment with OTP footer is rejected',
+    address: 'VM-ICICIB',
+    body: 'Your UPI payment of INR 650.00 to SHOP B from Acct XX111 was declined due to insufficient balance. Never share your OTP.',
+    expect: null,
+  },
+  {
+    name: 'failed payment "will be reversed" is rejected (never charged)',
+    address: 'VM-KOTAKB',
+    body: 'UPI txn of Rs 340.00 from Kotak Bank AC X1111 failed. Amount, if debited, will be reversed within 48 hrs.',
+    expect: null,
+  },
+  {
+    name: 'completed reversal is a refund',
+    address: 'AD-AXISBK-S',
+    body: 'INR 450.00 reversed to your A/c XX1111 on 01-10-26 for UPI txn 612345678906',
+    expect: { type: 'income', amount: 450, refund: true, party: 'Refund / reversal' },
+  },
+  {
+    name: 'refund credited from a merchant',
+    address: 'AX-HDFCBK-S',
+    body: 'Refund of Rs.799.00 credited to your HDFC Bank A/c XX1111 from AMAZON on 02-10-26. Ref 612345678907',
+    expect: { type: 'income', amount: 799, refund: true, party: 'AMAZON' },
+  },
+  {
+    name: 'debit that was later reversed counts as a refund',
+    address: 'VM-SBIUPI',
+    body: 'Rs 999.00 debited from A/C X1111 on 28Sep26 has been reversed to your account on 01Oct26. Ref 612345678908 -SBI',
+    expect: { type: 'income', amount: 999, refund: true },
+  },
+  {
+    name: 'salary credit is not a refund',
+    address: 'VM-HDFCBK',
+    body: 'Update! INR 30,000.00 deposited in HDFC Bank A/c XX1111 on 01-OCT-26 for NEFT Cr-ACME LTD.',
+    expect: { type: 'income', amount: 30000, refund: false },
+  },
+  {
+    name: 'Indian format: INR 1,05,000',
+    address: 'VM-KOTAKB',
+    body: 'INR 1,05,000 credited to Kotak Bank AC X1111 from A KUMAR on 01-10-26 UPI Ref 612345678909',
+    expect: { type: 'income', amount: 105000, party: 'A KUMAR', refund: false },
+  },
+  {
+    name: 'Indian format with ₹ and paise: ₹1,05,000.50',
+    address: 'AX-HDFCBK-S',
+    body: '₹1,05,000.50 debited from A/c XX1111 to VPA landlord@okicici on 01-10-26. UPI Ref 612345678910. Not you? Call 18002586161',
+    expect: { type: 'expense', amount: 105000.5, party: 'landlord@okicici' },
   },
 ];

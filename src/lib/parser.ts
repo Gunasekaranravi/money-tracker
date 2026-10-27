@@ -10,6 +10,9 @@ export type ParsedTxn = {
   bank: string;
   account: string | null; // last digits
   ref: string | null; // UPI / bank reference, used to drop duplicate SMS
+  // Money that came back (refund / reversal). Still type 'income' so totals behave as before;
+  // not stored in the database yet.
+  refund: boolean;
 };
 
 const BANKS: Record<string, string> = {
@@ -39,7 +42,39 @@ const SKIP = [
 
 const DEBIT_WORDS = /\b(debited|spent|sent|paid|withdrawn|deducted|purchase|txn of)\b/i;
 const CREDIT_WORDS = /\b(credited|received|deposited|refund(ed)?|reversed)\b/i;
+const REFUND_WORDS = /\b(refund(ed)?|reversed|reversal)\b/i;
 const MONEYISH = /a\/c|acct|account|\bcard\b|upi|vpa|bank|imps|neft/i;
+
+// Security / promo footer lines ("Never share your OTP", "If not requested by you, call 1800…",
+// "win rewards"). They are dropped before the skip rules run, so they can't reject a real transaction.
+const FOOTER_MARKERS = [
+  /\b(never|do not|don'?t)\s+share\b/i,
+  /\bnot\s+(you|u)\b/i,
+  /\bif\s+not\s+(done|requested|initiated|made|authori[sz]ed|performed)\b/i,
+  /\b(call|sms|whatsapp|report)\b[^\n]*\d{5,}/i,
+  /\b(win|rewards?|offers?)\b/i,
+  /https?:\/\/|www\./i,
+];
+// A line that clearly reports a completed transaction is never treated as a footer.
+const EVENT_WORDS = /\b(debited|credited|spent|withdrawn|deposited)\b/i;
+
+function splitLines(body: string): string[] {
+  return body
+    .replace(/([.!?])\s+/g, '$1\n')
+    .split(/\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** The message without its footer lines. Skip rules, type and amount are read from this. */
+function coreText(body: string): string {
+  return splitLines(body)
+    .filter((line) => !(FOOTER_MARKERS.some((r) => r.test(line)) && !EVENT_WORDS.test(line)))
+    .join('\n');
+}
+
+// Future credits ("will be reversed in 48 hrs") are not a completed refund.
+const PENDING_CREDIT = /\bwill be (credited|reversed|refunded)\b[^\n]*/gi;
 
 function bankFrom(address: string): string {
   // Sender IDs look like "AX-HDFCBK-S" or "VM-SBIUPI".
@@ -48,15 +83,28 @@ function bankFrom(address: string): string {
   return BANKS[code] ?? BANKS[code.slice(0, 6)] ?? code;
 }
 
-function parseAmount(body: string): number | null {
-  const withCurrency = body.match(/(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)/i);
-  const bare = body.match(
-    /\b(?:debited|credited|sent|spent)\s+(?:by|for|with|of)?\s*([\d,]+(?:\.\d{1,2})?)/i,
-  );
-  const raw = withCurrency?.[1] ?? bare?.[1];
-  if (!raw) return null;
+const CURRENCY_AMOUNT = /(?:\brs\.?|\binr|₹)\s*(\d[\d,]*(?:\.\d{1,2})?)/gi;
+// Text right before an amount that marks it as a balance or limit, not the transaction.
+const INFO_BEFORE =
+  /(?:\b(?:avl|avbl|available|a\/c|acct)\.?\s*)?(?:\bbal|balance|limit|\blmt)\.?(?:\s+(?:is|of|was))?[\s:.\-]*$/i;
+const BARE_AMOUNT =
+  /\b(?:debited|credited|sent|spent|withdrawn|reversed|refunded)\s+(?:by|for|with|of)?\s*(\d[\d,]*(?:\.\d{1,2})?)/i;
+
+function toAmount(raw: string): number | null {
   const n = parseFloat(raw.replace(/,/g, ''));
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** First ₹/Rs/INR amount that isn't a balance or limit; else a bare number after "debited by" etc. */
+function parseAmount(text: string): number | null {
+  for (const m of text.matchAll(CURRENCY_AMOUNT)) {
+    const before = text.slice(Math.max(0, (m.index ?? 0) - 25), m.index);
+    if (INFO_BEFORE.test(before)) continue;
+    const n = toAmount(m[1]);
+    if (n) return n;
+  }
+  const bare = text.match(BARE_AMOUNT);
+  return bare ? toAmount(bare[1]) : null;
 }
 
 function detectType(body: string): TxnType | null {
@@ -72,7 +120,7 @@ function detectType(body: string): TxnType | null {
 const clean = (s: string) =>
   s.replace(/\s+/g, ' ').replace(/[.,;:]+$/, '').trim().slice(0, 40);
 
-function parseParty(body: string, type: TxnType): string {
+function parseParty(body: string, type: TxnType, refund: boolean): string {
   const patterns: RegExp[] =
     type === 'expense'
       ? [
@@ -101,13 +149,16 @@ function parseParty(body: string, type: TxnType): string {
       if (v && !/^(?:(?:a\/?c|your|ur|upi)\b|rs\.?\s*\d|inr\b|₹|\d)/i.test(v)) return v;
     }
   }
+  if (refund) return 'Refund / reversal';
   return type === 'expense' ? 'Payment' : 'Money received';
 }
 
 function parseRef(body: string): string | null {
   const m =
     body.match(/UPI\/P2[AM]\/(\d{9,14})/i) ??
-    body.match(/(?:ref(?:erence)?\.?\s*(?:no|id)?|refno|upi\s*ref|rrn|upi)[\s:.#-]*(\d{9,14})/i);
+    body.match(
+      /(?:ref(?:erence)?\.?\s*(?:no|id)?|refno|upi\s*(?:ref|txn)(?:\s*(?:no|id))?|rrn|upi)[\s:.#-]*(\d{9,14})/i,
+    );
   return m?.[1] ?? null;
 }
 
@@ -121,19 +172,25 @@ export function parseSms(address: string | null, body: string | null): ParsedTxn
   // Personal numbers (+91..., 10 digits) are not banks.
   if (/^\+?\d[\d\s]{6,}$/.test(address.trim())) return null;
   if (!MONEYISH.test(body)) return null;
-  if (SKIP.some((r) => r.test(body))) return null;
 
-  const type = detectType(body);
+  const core = coreText(body);
+  if (SKIP.some((r) => r.test(core))) return null;
+
+  const settled = core.replace(PENDING_CREDIT, '');
+  // A completed refund/reversal is money coming back, even if the SMS also says "debited".
+  const refund = REFUND_WORDS.test(settled);
+  const type = refund ? 'income' : detectType(settled);
   if (!type) return null;
-  const amount = parseAmount(body);
+  const amount = parseAmount(settled);
   if (!amount) return null;
 
   return {
     type,
     amount,
-    party: parseParty(body, type),
+    party: parseParty(body, type, refund),
     bank: bankFrom(address),
     account: parseAccount(body),
     ref: parseRef(body),
+    refund,
   };
 }
