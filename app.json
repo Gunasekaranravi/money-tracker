@@ -1,25 +1,39 @@
 {
   "expo": {
-    "name": "money-tracker",
+    "name": "Money Tracker",
     "slug": "money-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0E0F13",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.gunas.moneytracker",
+      "permissions": [
+        "android.permission.READ_SMS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-sqlite"
+    ],
+    "backgroundColor": "#0E0F13",
+    "extra": {
+      "eas": {
+        "projectId": "d53d59d8-d4ff-4f12-8f35-ba089c75ee5e"
+      }
+    },
+    "owner": "guna07msd"
   }
 }
