@@ -41,8 +41,21 @@ const SKIP = [
 ];
 
 const DEBIT_WORDS = /\b(debited|spent|sent|paid|withdrawn|deducted|purchase|txn of)\b/i;
-const CREDIT_WORDS = /\b(credited|received|deposited|refund(ed)?|reversed)\b/i;
-const REFUND_WORDS = /\b(refund(ed)?|reversed|reversal)\b/i;
+// The noun "refund" alone is not a credit ("refund initiated"), so only the past tense counts here.
+const CREDIT_WORDS = /\b(credited|received|deposited|refunded|reversed)\b/i;
+
+// Completed-refund evidence (checked line by line, after pending phrases are removed):
+//  - past tense: "refunded", "reversed" ("INR 450 reversed to your A/c", "has been reversed")
+//  - the noun tied to a credit: "Refund of Rs 799 credited", "credited … as/towards … refund"
+// A bare noun ("reversal request", "for reversal queries", "refund initiated") is not enough.
+const COMPLETED_REFUND = [
+  /\b(refunded|reversed)\b/i,
+  /\b(refund|reversal)\b[^\n]{0,40}\bcredited\b/i,
+  /\bcredited\b[^\n]{0,40}\b(as|towards|being)\b[^\n]{0,20}\b(refund|reversal)\b/i,
+];
+// Refund still in progress. Blocks the refund flag (never rejects a real debit/credit by itself).
+const PENDING_REFUND =
+  /\b(initiated|being processed|in process|under process|will be (credited|reversed|refunded|done|processed))\b/i;
 const MONEYISH = /a\/c|acct|account|\bcard\b|upi|vpa|bank|imps|neft/i;
 
 // Security / promo footer lines ("Never share your OTP", "If not requested by you, call 1800…",
@@ -76,9 +89,19 @@ function coreText(body: string): string {
 // Future credits ("will be reversed in 48 hrs") are not a completed refund.
 const PENDING_CREDIT = /\bwill be (credited|reversed|refunded)\b[^\n]*/gi;
 
+/** Refund rule shared by parseSms() and isRefundText(). `core` is the message without footers. */
+function isCompletedRefund(core: string): boolean {
+  if (PENDING_REFUND.test(core)) return false;
+  const settled = core.replace(PENDING_CREDIT, '');
+  return COMPLETED_REFUND.some((r) => r.test(settled));
+}
+
 /** True when an SMS reports a completed refund/reversal. Also used to backfill rows saved earlier. */
 export function isRefundText(body: string): boolean {
-  return REFUND_WORDS.test(coreText(body).replace(PENDING_CREDIT, ''));
+  const core = coreText(body);
+  // Same reject rules as parseSms(): a failed/declined/OTP message is never a refund.
+  if (SKIP.some((r) => r.test(core))) return false;
+  return isCompletedRefund(core);
 }
 
 function bankFrom(address: string): string {
@@ -182,8 +205,9 @@ export function parseSms(address: string | null, body: string | null): ParsedTxn
   if (SKIP.some((r) => r.test(core))) return null;
 
   const settled = core.replace(PENDING_CREDIT, '');
-  // A completed refund/reversal is money coming back, even if the SMS also says "debited".
-  const refund = REFUND_WORDS.test(settled);
+  // A completed refund/reversal is money coming back, even if the SMS also says "debited"
+  // ("Rs 999 debited … has been reversed"). Anything less keeps its normal debit/credit type.
+  const refund = isCompletedRefund(core);
   const type = refund ? 'income' : detectType(settled);
   if (!type) return null;
   const amount = parseAmount(settled);

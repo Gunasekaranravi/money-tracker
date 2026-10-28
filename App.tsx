@@ -20,7 +20,7 @@ import { EMPTY_SUMMARY } from './src/lib/schema';
 import { loadDemoData, syncSms } from './src/lib/sync';
 import { C, rupees, when } from './src/theme';
 
-type Access = 'checking' | 'granted' | 'needed' | 'demo';
+type Access = 'checking' | 'granted' | 'needed' | 'demo' | 'error';
 
 const EMPTY: Summary = EMPTY_SUMMARY;
 
@@ -74,14 +74,20 @@ function Main() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      await reload();
-      setSyncing(false);
+      try {
+        await reload();
+      } finally {
+        setSyncing(false);
+      }
     }
   }, [reload]);
 
-  // First launch: check SMS permission (or demo mode), then read new SMS.
-  useEffect(() => {
-    (async () => {
+  // Startup: check SMS permission (or demo mode), then read new SMS.
+  // If the database can't be opened, show an error with "Try again" instead of a spinner.
+  const start = useCallback(async () => {
+    setAccess('checking');
+    setError(null);
+    try {
       if (await hasSmsPermission()) {
         setAccess('granted');
         await sync();
@@ -91,8 +97,15 @@ function Main() {
       } else {
         setAccess('needed');
       }
-    })();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setAccess('error');
+    }
   }, [sync, reload]);
+
+  useEffect(() => {
+    start();
+  }, [start]);
 
   // Every time the app comes back to the front, pick up new SMS.
   useEffect(() => {
@@ -125,6 +138,20 @@ function Main() {
       <View style={[styles.screen, styles.center]}>
         <ActivityIndicator color={C.accent} />
       </View>
+    );
+  }
+
+  if (access === 'error') {
+    return (
+      <SafeAreaView style={[styles.screen, styles.center, { padding: 28 }]}>
+        <Text style={styles.bigEmoji}>⚠️</Text>
+        <Text style={styles.title}>Couldn't open your data</Text>
+        <Text style={styles.para}>Your saved transactions are still on this phone. Try again.</Text>
+        {error && <Text style={styles.error}>{error}</Text>}
+        <Pressable style={styles.primary} onPress={start}>
+          <Text style={styles.primaryText}>Try again</Text>
+        </Pressable>
+      </SafeAreaView>
     );
   }
 

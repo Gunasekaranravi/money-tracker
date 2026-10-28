@@ -191,4 +191,66 @@ export const REGRESSION_SMS: SampleSms[] = [
     body: '₹1,05,000.50 debited from A/c XX1111 to VPA landlord@okicici on 01-10-26. UPI Ref 612345678910. Not you? Call 18002586161',
     expect: { type: 'expense', amount: 105000.5, party: 'landlord@okicici' },
   },
+
+  // Refund wording: only a completed refund counts; a bare "refund"/"reversal" never flips a debit.
+  {
+    name: 'R1 salary + "for reversal queries contact branch"',
+    address: 'VM-HDFCBK',
+    body: 'INR 30,000.00 credited to HDFC Bank A/c XX1111 on 01-10-26 by NEFT from ACME LTD, for reversal queries contact your branch.',
+    expect: { type: 'income', amount: 30000, refund: false },
+  },
+  {
+    name: 'R2 debit + "raise a reversal request" stays expense',
+    address: 'AX-HDFCBK',
+    body: 'Rs.500.00 debited from A/c XX1111 to VPA shop@okaxis on 01-10-26, if not done by you raise a reversal request at your branch',
+    expect: { type: 'expense', amount: 500, refund: false },
+  },
+  {
+    name: 'R3 refund initiated (5-7 days) is not recorded',
+    address: 'AX-HDFCBK',
+    body: 'Refund of Rs.799.00 has been initiated to your HDFC Bank Card XX1111 by AMAZON. It will reflect in 5-7 working days.',
+    expect: null,
+  },
+  {
+    name: 'R4 refund being processed, will be credited: not recorded',
+    address: 'JD-ICICIB',
+    body: 'Your refund of INR 1,250.00 for order 4471 is being processed and will be credited to ICICI Bank Acct XX111 in 3 days.',
+    expect: null,
+  },
+  {
+    name: 'R5 "Reversal will be done in 48 hrs" is not a refund',
+    address: 'VM-SBIUPI',
+    body: 'Txn of Rs 340 on A/C X1111 could not be completed. Reversal will be done within 48 hrs. -SBI',
+    expect: { type: 'expense', amount: 340, refund: false },
+  },
+  {
+    name: 'R6 could not be completed, amount has been reversed',
+    address: 'VM-SBIUPI',
+    body: 'Txn of Rs 340 from A/C X1111 could not be completed. Amount debited has been reversed to your account. -SBI',
+    expect: { type: 'income', amount: 340, refund: true },
+  },
+  {
+    name: 'R7 declined + "Amount reversed" is rejected',
+    address: 'VM-ICICIB',
+    body: 'Your payment of INR 650.00 from Acct XX111 was declined. Amount reversed to account.',
+    expect: null,
+  },
+  {
+    name: 'R8 debit + footer "Not you? Request reversal" stays expense',
+    address: 'AX-HDFCBK-S',
+    body: 'Rs.500.00 debited from A/c XX1111 to VPA shop@okaxis on 01-10-26. UPI Ref 612345678920. Not you? Request reversal: https://hdfc.bank/x',
+    expect: { type: 'expense', amount: 500, party: 'shop@okaxis', refund: false },
+  },
+  {
+    name: 'R9 refund has been credited to the account',
+    address: 'JD-ICICIB-S',
+    body: 'Refund of INR 1,250.00 has been credited to your ICICI Bank Acct XX111 on 03-10-26 from FLIPKART. Ref 612345678923',
+    expect: { type: 'income', amount: 1250, refund: true, party: 'FLIPKART' },
+  },
+  {
+    name: 'R10 cashback credited is ordinary income',
+    address: 'AX-HDFCBK-S',
+    body: 'Cashback of Rs.50.00 credited to your HDFC Bank A/c XX1111 on 01-10-26 for UPI txn 612345678922',
+    expect: { type: 'income', amount: 50, refund: false },
+  },
 ];

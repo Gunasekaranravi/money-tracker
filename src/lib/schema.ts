@@ -1,7 +1,25 @@
-// SQLite schema, migrations and the summary query. No Expo imports, so Node tests can run
-// the same SQL against a real SQLite database (scripts/test-summary.ts).
+// SQLite schema, migrations, row writes and the summary query. No Expo imports, so Node tests
+// can run the same code against a real SQLite database (scripts/test-summary.ts).
+import type { ParsedTxn } from './parser';
 
 export const SCHEMA_VERSION = 1;
+
+/**
+ * Runs `open` once and shares the result. If it fails, the failure is not kept:
+ * the next call tries again (nothing is cleared or deleted).
+ */
+export function retryableOnce<T>(open: () => Promise<T>): () => Promise<T> {
+  let pending: Promise<T> | null = null;
+  return () => {
+    if (!pending) {
+      pending = open().catch((e) => {
+        pending = null;
+        throw e;
+      });
+    }
+    return pending;
+  };
+}
 
 // kind: NULL = normal transaction, 'refund' = money returned (type stays 'income').
 export const CREATE_SQL = `
@@ -27,7 +45,7 @@ export const CREATE_SQL = `
 /** The few database calls migrations need (expo-sqlite's API shape). */
 export type MigrationDb = {
   execAsync(sql: string): Promise<void>;
-  runAsync(sql: string, ...params: (string | number | null)[]): Promise<unknown>;
+  runAsync(sql: string, ...params: (string | number | null)[]): Promise<{ changes: number }>;
   getFirstAsync<T>(sql: string, ...params: (string | number | null)[]): Promise<T | null>;
   getAllAsync<T>(sql: string, ...params: (string | number | null)[]): Promise<T[]>;
   withTransactionAsync(task: () => Promise<void>): Promise<void>;
@@ -59,6 +77,27 @@ export async function migrate(d: MigrationDb, isRefundText: (body: string) => bo
       await d.execAsync('PRAGMA user_version = 1');
     });
   }
+}
+
+/**
+ * Inserts a parsed SMS. Skips it if the id already exists (never overwrites label or kind),
+ * or if a row with the same UPI ref and type exists (some banks send 2 SMS).
+ */
+export async function insertTxnRow(d: MigrationDb, id: string, p: ParsedTxn, date: number, body: string) {
+  if (p.ref) {
+    const dup = await d.getFirstAsync('SELECT id FROM txns WHERE ref = ? AND type = ?', p.ref, p.type);
+    if (dup) return false;
+  }
+  const r = await d.runAsync(
+    `INSERT OR IGNORE INTO txns (id, type, amount, party, bank, account, ref, date, body, label, kind)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    id, p.type, p.amount, p.party, p.bank, p.account, p.ref, date, body, p.refund ? 'refund' : null,
+  );
+  return r.changes > 0;
+}
+
+export async function setLabelRow(d: MigrationDb, id: string, label: string | null) {
+  await d.runAsync('UPDATE txns SET label = ? WHERE id = ?', label, id);
 }
 
 export type Summary = {

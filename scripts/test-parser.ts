@@ -1,5 +1,5 @@
 // Run: npm run test:parser
-import { parseSms } from '../src/lib/parser.ts';
+import { isRefundText, parseSms } from '../src/lib/parser.ts';
 import { REGRESSION_SMS, SAMPLE_SMS, type SampleSms } from '../src/lib/samples.ts';
 
 let failed = 0;
@@ -17,9 +17,11 @@ function run(title: string, cases: SampleSms[]) {
           got.amount === e.amount &&
           (e.party === undefined || got.party === e.party) &&
           (e.refund === undefined || got.refund === e.refund);
-    if (!ok) failed++;
+    // The migration backfill uses isRefundText(); it must agree with parseSms() on every message.
+    const agrees = isRefundText(s.body) === (got?.refund ?? false);
+    if (!ok || !agrees) failed++;
     const label = s.name ?? s.address;
-    console.log(ok ? 'PASS' : 'FAIL', label.padEnd(56), JSON.stringify(got));
+    console.log(ok && agrees ? 'PASS' : 'FAIL', label.padEnd(56), JSON.stringify(got), agrees ? '' : '(isRefundText disagrees)');
   }
 }
 
